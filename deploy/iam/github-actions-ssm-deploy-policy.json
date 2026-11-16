@@ -1,0 +1,25 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "RunBackendDeployment",
+      "Effect": "Allow",
+      "Action": "ssm:SendCommand",
+      "Resource": [
+        "arn:aws:ssm:ap-northeast-2:015454941458:document/IEEE-DeployBackend",
+        "arn:aws:ec2:ap-northeast-2:015454941458:instance/i-0753e06df7c912786"
+      ]
+    },
+    {
+      "Sid": "ReadRunCommandInvocation",
+      "Effect": "Allow",
+      "Action": "ssm:GetCommandInvocation",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ap-northeast-2"
+        }
+      }
+    }
+  ]
+}
