@@ -1,0 +1,20 @@
+services:
+  backend:
+    image: ${BACKEND_IMAGE:?Set BACKEND_IMAGE to an immutable image tag}
+    restart: unless-stopped
+    env_file:
+      - /etc/ieee/backend.env
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=60.0
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - /etc/ieee/rds-truststore.p12:/run/secrets/rds-truststore.p12:ro
+    mem_limit: 768m
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://127.0.0.1:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
