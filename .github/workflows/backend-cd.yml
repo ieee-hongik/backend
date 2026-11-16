@@ -5,6 +5,10 @@ on:
     branches:
       - main
 
+concurrency:
+  group: backend-cd-${{ github.sha }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
@@ -39,12 +43,43 @@ jobs:
       IMAGE_URI: 015454941458.dkr.ecr.ap-northeast-2.amazonaws.com/ieee-backend
 
     steps:
+      - name: Assume AWS role with GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::015454941458:role/IEEE-github-actions-ecr-role
+          aws-region: ap-northeast-2
+          allowed-account-ids: '015454941458'
+
+      - name: Check for commit image in ECR
+        id: check-image
+        shell: bash
+        env:
+          AWS_CLI_ERROR_FORMAT: legacy
+        run: |
+          if error=$(aws ecr describe-images \
+            --repository-name ieee-backend \
+            --image-ids "imageTag=$GITHUB_SHA" \
+            --no-paginate --no-cli-pager 2>&1 >/dev/null); then
+            echo 'exists=true' >> "$GITHUB_OUTPUT"
+            echo "Image $IMAGE_URI:$GITHUB_SHA already exists. Skipping publish."
+          else
+            status=$?
+            if grep -q '^An error occurred (ImageNotFoundException) when calling the DescribeImages operation:' <<< "$error"; then
+              echo 'exists=false' >> "$GITHUB_OUTPUT"
+            else
+              printf '%s\n' "$error" >&2
+              exit "$status"
+            fi
+          fi
+
       - name: Check out repository
+        if: steps.check-image.outputs.exists == 'false'
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
       - name: Build Docker image
+        if: steps.check-image.outputs.exists == 'false'
         shell: bash
         run: |
           if [[ ! -f Dockerfile ]]; then
@@ -53,15 +88,10 @@ jobs:
           fi
           docker build --platform linux/amd64 --tag "$IMAGE_URI:$GITHUB_SHA" .
 
-      - name: Assume AWS role with GitHub OIDC
-        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
-        with:
-          role-to-assume: arn:aws:iam::015454941458:role/IEEE-github-actions-ecr-role
-          aws-region: ap-northeast-2
-          allowed-account-ids: '015454941458'
-
       - name: Log in to Amazon ECR
+        if: steps.check-image.outputs.exists == 'false'
         uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
 
       - name: Push image to Amazon ECR
+        if: steps.check-image.outputs.exists == 'false'
         run: docker push "$IMAGE_URI:$GITHUB_SHA"
