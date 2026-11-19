@@ -1,0 +1,104 @@
+name: Backend CD
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: backend-cd-${{ github.sha }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Build and test with Gradle
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Build and test
+        run: ./gradlew build --no-daemon
+
+  publish:
+    name: Publish image to ECR
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      IMAGE_URI: 015454941458.dkr.ecr.ap-northeast-2.amazonaws.com/ieee-backend
+
+    steps:
+      - name: Assume AWS role with GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::015454941458:role/IEEE-github-actions-ecr-role
+          aws-region: ap-northeast-2
+          allowed-account-ids: '015454941458'
+
+      - name: Check for commit image in ECR
+        id: check-image
+        shell: bash
+        env:
+          AWS_CLI_ERROR_FORMAT: legacy
+        run: |
+          if error=$(aws ecr describe-images \
+            --repository-name ieee-backend \
+            --image-ids "imageTag=$GITHUB_SHA" \
+            --no-paginate --no-cli-pager 2>&1 >/dev/null); then
+            echo 'exists=true' >> "$GITHUB_OUTPUT"
+            echo "Image $IMAGE_URI:$GITHUB_SHA already exists. Skipping publish."
+          else
+            status=$?
+            if grep -q '^An error occurred (ImageNotFoundException) when calling the DescribeImages operation:' <<< "$error"; then
+              echo 'exists=false' >> "$GITHUB_OUTPUT"
+            else
+              printf '%s\n' "$error" >&2
+              exit "$status"
+            fi
+          fi
+
+      - name: Check out repository
+        if: steps.check-image.outputs.exists == 'false'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Build Docker image
+        if: steps.check-image.outputs.exists == 'false'
+        shell: bash
+        run: |
+          if [[ ! -f Dockerfile ]]; then
+            echo '::error::Dockerfile is missing. Merge the Docker setup from issue #7 before publishing.'
+            exit 1
+          fi
+          docker build --platform linux/amd64 --tag "$IMAGE_URI:$GITHUB_SHA" .
+
+      - name: Log in to Amazon ECR
+        if: steps.check-image.outputs.exists == 'false'
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
+
+      - name: Push image to Amazon ECR
+        if: steps.check-image.outputs.exists == 'false'
+        run: docker push "$IMAGE_URI:$GITHUB_SHA"
+  deploy:
+    name: Deploy backend to EC2
+    needs: publish
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/backend-deploy.yml
