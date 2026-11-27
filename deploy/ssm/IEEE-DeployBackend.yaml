@@ -1,0 +1,15 @@
+schemaVersion: '2.2'
+description: Deploy an immutable IEEE backend image on the EC2 host.
+parameters:
+  CommitSha:
+    type: String
+    description: Full lowercase commit SHA for the image in ECR.
+    allowedPattern: '^[0-9a-f]{40}$'
+    interpolationType: ENV_VAR
+mainSteps:
+  - action: aws:runShellScript
+    name: DeployBackend
+    inputs:
+      timeoutSeconds: '1200'
+      runCommand:
+        - exec /bin/bash /opt/ieee/backend/deploy-backend.sh "${SSM_CommitSha:?CommitSha is required}"
