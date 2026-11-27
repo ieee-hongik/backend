@@ -24,14 +24,16 @@ IntelliJ의 Project SDK와 Gradle JVM을 JDK 21로 설정합니다.
 
 - Spring Web MVC
 - Validation
+- 자동 작업 실패 기록용 JDBC 저장 계층과 MySQL 드라이버
 - Spring Boot 기본 테스트 환경
 
-기본 프로젝트 실행·테스트·빌드를 확인했습니다.
-아직 기능별 API와 데이터베이스 연결은 구성하지 않았습니다.
+기능별 API와 관리자 조회 화면은 후속 작업에서 연결합니다.
 
 ## 실행
 
 저장소 루트에서 실행합니다.
+
+서버 실행에는 MySQL 데이터베이스가 필요합니다. 실행하는 셸에 `SPRING_DATASOURCE_URL`(예: `jdbc:mysql://localhost:3306/ieee_backend`), `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`를 설정합니다. 빈 로컬 개발 DB에서는 `SPRING_SQL_INIT_MODE=always`를 설정하면 시작할 때 `src/main/resources/schema.sql`로 실패 기록 테이블을 생성합니다. 운영 DB에 대해서는 배포 담당자가 스키마를 적용합니다.
 
 Windows PowerShell:
 
@@ -70,6 +72,27 @@ build는 기본 테스트를 포함합니다.
 ```powershell
 .\gradlew.bat test
 ```
+
+자동 작업 실패 기록 테스트는 임베디드 H2를 사용합니다. MySQL 서버 없이 실행할 수 있습니다.
+
+## 자동 작업에서 실패 기록 남기기
+
+자동 작업 클래스에 `AutomaticJobFailureRecorder`를 주입합니다. 아래 예시는 호출 방식이며 `jobType`과 대상 종류는 업무 코드에서 정한 고정 식별자입니다. 식별자는 영문 대문자로 시작하고 영문 대문자·숫자·밑줄을 최대 80자까지 쓸 수 있습니다. 개별 대상이 없는 작업은 두 번째 인자로 `null`을 전달합니다.
+
+```java
+try {
+    worker.process(targetId);
+} catch (RuntimeException failure) {
+    failureRecorder.recordFailure(jobType, new AutomaticJobFailureRecorder.Target(targetType, targetId), failure);
+    throw failure;
+}
+```
+
+위 코드는 스케줄러에서 실제 업무를 수행하는 트랜잭션 메서드를 호출하는 경계에 둡니다. 업무가 실패한 뒤 원래 예외를 다시 던져 스케줄러가 실패를 알 수 있게 합니다. 여러 대상을 처리할 때 중단·계속 여부는 각 업무에서 결정합니다.
+
+`AutomaticJobFailureRecorder`는 `REQUIRES_NEW`로 실패 기록 저장을 별도 트랜잭션에서 처리합니다. 호출 시점에 업무 트랜잭션이 열려 있어도 별도 커밋하므로 업무 롤백과 독립적입니다. 가능하면 업무 트랜잭션을 종료한 뒤 호출하면 동시에 필요한 DB 연결 수를 줄일 수 있습니다.
+
+테이블에는 작업과 대상 식별자, UTC 실패 시각, 예외 클래스, 고정 오류 안내를 저장합니다. 실패 기록 ID는 서버 로그 검색에도 사용합니다. 원본 예외 메시지·스택 트레이스는 이 기능이 저장하거나 로그에 추가하지 않습니다. 기록 저장이 실패하면 DB에 행을 남기지 못할 수 있으며, 로그에 실패 ID·검증된 작업 종류·예외 클래스를 남깁니다. 호출자는 원래 업무 오류를 다시 던질 수 있습니다.
 
 ## 브랜치 규칙
 
@@ -128,7 +151,7 @@ build는 기본 테스트를 포함합니다.
 ## 추후 구성
 
 - 기능명세·ERD에 따른 도메인별 레이어드 구조
-- MySQL 연결 및 영속성 계층
+- 도메인별 MySQL 테이블 및 영속성 계층 확장
 - 공통 응답·예외 처리 — 오류 코드 원본 확인 후 구현
 - S3·메일·Excel·PDF 관련 설정
 - 검사 기준 합의에 따른 GitHub Actions CI
