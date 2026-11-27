@@ -1,0 +1,31 @@
+# 로컬 개발용 MySQL. Spring Boot는 호스트에서 실행한다.
+# docker compose --env-file .env.dev -f compose.dev.yaml up -d
+name: ieee-backend-dev
+
+services:
+  mysql:
+    image: mysql:8.4
+    restart: "no"
+    ports:
+      - "127.0.0.1:${DB_PORT:?DB_PORT is required}:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}
+      MYSQL_DATABASE: ieee_db
+      MYSQL_USER: ${DB_USERNAME:?DB_USERNAME is required}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'mysql --user="$$MYSQL_USER" --password="$$MYSQL_PASSWORD" --protocol=TCP --host=127.0.0.1 --database=ieee_db --connect-timeout=3 --execute="SELECT 1"'
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+volumes:
+  mysql-data:
