@@ -1,0 +1,15 @@
+.git
+.github
+.gradle
+.idea
+.codex-context
+AGENTS.md
+build
+out
+logs
+*.log
+.env
+.env.*
+backend.env
+*.p12
+*.jks
